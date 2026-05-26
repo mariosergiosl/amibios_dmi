@@ -36,6 +36,7 @@
 #include <linux/slab.h>
 #include <linux/mutex.h>
 #include "amibios_smi.h"
+#include <asm/io.h>
 
 #define SMI_PORT		0xb2
 #define SMI_CMD_INFO		0x50
@@ -390,46 +391,55 @@ int amibios_smi_write_byte(int handle, int offset, u8 b)
  */
 int amibios_smi_write_string(int handle, int offset, char *s)
 {
-	int ret, len;
+        int ret;
+        size_t len;                    /* Alterado para size_t */
 
-	mutex_lock(&amibios_mutex);
+        mutex_lock(&amibios_mutex);
 
-	/* Read existing data */
-	len = smi_read(handle);
-	if (len < 0)
-		goto err;
+        /* Read existing data */
+        len = smi_read(handle);
+        if (len < 0)
+                goto err;
 
-	if (check_buffer_size(0x80) < 0)	/* max. string size */
-		goto err;
+        if (check_buffer_size(0x80) < 0) /* max. string size */
+                goto err;
 
-	memmove(&amibios_data->write.data.data, &amibios_data->read.data, len);
-	
-	/* Set up write structure */
-	amibios_data->write.command      = SMI_CMD_WRITE;
-	amibios_data->write.data_ptr     = amibios_data_ptr + 0x0f;
-	amibios_data->write.buffer_ptr   = amibios_buffer_ptr;
-	amibios_data->write.write_enable = 1;
-	amibios_data->write.unknown1     = 0;
-	amibios_data->write.unknown2     = 0;
+        memmove(&amibios_data->write.data.data, &amibios_data->read.data, len);
 
-	amibios_data->write.data.command = AMIBIOS_CMD_WRITE_STRING;
-	amibios_data->write.data.offset  = offset;
-	amibios_data->write.data.length  = strlen(s) + 1;
-	strcpy(amibios_data->write.data.data.raw + 4, s);
+        /* Set up write structure */
+        amibios_data->write.command = SMI_CMD_WRITE;
+        amibios_data->write.data_ptr = amibios_data_ptr + 0x0f;
+        amibios_data->write.buffer_ptr = amibios_buffer_ptr;
+        amibios_data->write.write_enable = 1;
+        amibios_data->write.unknown1 = 0;
+        amibios_data->write.unknown2 = 0;
+        amibios_data->write.data.command = AMIBIOS_CMD_WRITE_STRING;
+        amibios_data->write.data.offset = offset;
 
-	ret = smi_command(SMI_PORT, SMI_CMD_WRITE, (u32)amibios_data_ptr);
-	if (ret) {
-		smi_error_message(ret);
-		goto err;
-	}
+        /* Copia segura da string (compatível com Fortify Source) */
+        len = strlen(s);
+        if (len >= sizeof(amibios_data->write.data.data.raw) - 4) {
+            len = sizeof(amibios_data->write.data.data.raw) - 5;
+        }
+        memcpy(amibios_data->write.data.data.raw + 4, s, len);
+        amibios_data->write.data.data.raw[4 + len] = '\0';
 
-	mutex_unlock(&amibios_mutex);
-	return 0;
+        amibios_data->write.data.length = len + 1;
+
+        ret = smi_command(SMI_PORT, SMI_CMD_WRITE, (u32)amibios_data_ptr);
+        if (ret) {
+                smi_error_message(ret);
+                goto err;
+        }
+
+        mutex_unlock(&amibios_mutex);
+        return 0;
 
     err:
-	mutex_unlock(&amibios_mutex);
-	return -1;
+        mutex_unlock(&amibios_mutex);
+        return -1;
 }
+
 
 /**
  * amibios_smi_init() - initialize SMI data.
@@ -464,11 +474,24 @@ int __init amibios_smi_init(int *version)
 		goto err2;
 
 	/* Being extra cautious */
-	if (amibios_data->info.version < 0x24 ||
+	/* if (amibios_data->info.version < 0x24 ||
 	    amibios_data->info.version > 0x28) {
 		pr_err("amibios_dmi: unsupported SMBIOS version\n");
 		goto err2;
-	}
+	} */
+
+	/* Suporte ampliado para SMBIOS 2.x e 3.x (sua BIOS é 3.0) */
+	if (amibios_data->info.version < 0x20) {
+		pr_err("amibios_dmi: unsupported SMBIOS version (too old): 0x%04x\n",
+		       amibios_data->info.version);
+		goto err2;
+	} else if (amibios_data->info.version > 0x0300) {
+		pr_warn("amibios_dmi: very new SMBIOS version 0x%04x - proceeding anyway\n",
+			amibios_data->info.version);
+	} else {
+		pr_info("amibios_dmi: SMBIOS version 0x%04x accepted\n",
+			amibios_data->info.version);
+	}	
 
 	if (amibios_data->info.st_num == 0) {
 		pr_err("amibios_dmi: no DMI structures\n");
