@@ -5,6 +5,8 @@
 ![Language: C](https://img.shields.io/badge/Language-C-blue) 
 ![License: GPLv2](https://img.shields.io/badge/License-GPLv2-green) 
 ![Platform: Linux](https://img.shields.io/badge/Platform-Linux-orange)
+![SLES](https://img.shields.io/badge/Tested%20on-SLES%2012%20SP5%20%7C%2015%20SP5--SP7-73ba25)
+![Kernel](https://img.shields.io/badge/Kernel-5.14%20%7C%206.4-blue)
 
 A Linux kernel module to update DMI/SMBIOS information in AMI BIOS via System Management Interrupt (SMI) calls.
 
